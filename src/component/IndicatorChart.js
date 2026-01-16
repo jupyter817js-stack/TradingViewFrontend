@@ -41,6 +41,15 @@ function calculateBetterMomentum(candles, zeroValue = 50, lookback = 60) {
   const closes = candles.map(c => (c?.close ?? 0)); 
   const anyIndicator = rsi(closes, 5);
 
+  const results = candles.map(c => ({
+    time: c?.time ?? null,
+    momentum: null,
+    bullDiv: null,
+    bearDiv: null,
+    exBull: null,
+    exBear: null,
+  }));
+
   let HH = 0, LL = 0;
   let CountH = 0, CountL = 0;
 
@@ -52,67 +61,83 @@ function calculateBetterMomentum(candles, zeroValue = 50, lookback = 60) {
 
   let prevVal = null;
 
-  return candles.map((c, i) => {
-    if (!c || c.time == null) return { time: null, momentum: null, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
+  const value2Arr = Array(candles.length).fill(null);
+  const value3Arr = Array(candles.length).fill(null);
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (!c || c.time == null) continue;
 
     const val = anyIndicator[i];
-    if (val == null) return { time: c.time, momentum: null, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
-
-    const data = { time: c.time, momentum: val, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
+    if (val == null) continue;
 
     const Value2 = val - zeroValue;
-    data.momentum = Value2 + zeroValue;
+    value2Arr[i] = Value2;
+    value3Arr[i] = Math.abs(Value2);
+    results[i].momentum = Value2 + zeroValue;
 
-    // --- HH / LL ---
-    if (prevVal !== null) {
-      if ((prevVal >= 0 && Value2 < 0) || (prevVal >= LL / 2 && Value2 < LL / 2)) LL = Value2;
-      if ((prevVal <= 0 && Value2 > 0) || (prevVal <= HH / 2 && Value2 > HH / 2)) HH = Value2;
-    }
+    const crossBelowZero = prevVal !== null && prevVal >= 0 && Value2 < 0;
+    const crossBelowLL2 = prevVal !== null && prevVal >= LL / 2 && Value2 < LL / 2;
+    if (crossBelowZero || crossBelowLL2) LL = Value2;
     if (Value2 < 0 && Value2 <= LL) { LL = Value2; CountL = 0; }
+
+    const crossAboveZero = prevVal !== null && prevVal <= 0 && Value2 > 0;
+    const crossAboveHH2 = prevVal !== null && prevVal <= HH / 2 && Value2 > HH / 2;
+    if (crossAboveZero || crossAboveHH2) HH = Value2;
     if (Value2 > 0 && Value2 >= HH) { HH = Value2; CountH = 0; }
 
-    CountL++; CountH++;
+    CountL += 1;
+    CountH += 1;
 
-    // --- OscLow / PriceLow ---
-    if (prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2) {
+    const crossAboveLL2Now = prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2;
+    const crossBelowHH2Now = prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2;
+
+    if (crossAboveLL2Now) {
       OscLowOlder = OscLowOld; OscLowOld = OscLow; OscLow = LL;
       PriceLowOlder = PriceLowOld; PriceLowOld = PriceLow;
       const idxLow = i - (CountL - 1);
       if (idxLow >= 0 && candles[idxLow]) PriceLow = candles[idxLow].low ?? 0;
     }
 
-    // --- OscHigh / PriceHigh ---
-    if (prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2) {
+    if (crossBelowHH2Now) {
       OscHighOlder = OscHighOld; OscHighOld = OscHigh; OscHigh = HH;
       PriceHighOlder = PriceHighOld; PriceHighOld = PriceHigh;
       const idxHigh = i - (CountH - 1);
       if (idxHigh >= 0 && candles[idxHigh]) PriceHigh = candles[idxHigh].high ?? 0;
     }
 
-    // --- Divergence ---
     const Condition1 = OscLow > OscLowOld && PriceLow <= PriceLowOld;
     const Condition2 = OscLow > OscLowOlder && PriceLow <= PriceLowOlder;
     const Condition3 = OscHigh < OscHighOld && PriceHigh >= PriceHighOld;
     const Condition4 = OscHigh < OscHighOlder && PriceHigh >= PriceHighOlder;
 
-    if (prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2 && (Condition1 || Condition2)) data.bullDiv = LL + zeroValue;
-    if (prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2 && (Condition3 || Condition4)) data.bearDiv = HH + zeroValue;
+    if (crossAboveLL2Now && (Condition1 || Condition2)) {
+      const bullIndex = i - (CountL - 1);
+      if (bullIndex >= 0 && results[bullIndex]) results[bullIndex].bullDiv = LL + zeroValue;
+    }
+    if (crossBelowHH2Now && (Condition3 || Condition4)) {
+      const bearIndex = i - (CountH - 1);
+      if (bearIndex >= 0 && results[bearIndex]) results[bearIndex].bearDiv = HH + zeroValue;
+    }
 
-    // --- Exhaustion ---
-    if (i >= lookback) {
-      const Value2_prev = anyIndicator[i - 1] - zeroValue;
-      const lookbackSlice = anyIndicator.slice(i - lookback, i).map(v => Math.abs(v - zeroValue));
-      const highestPrev = Math.max(...lookbackSlice);
-
-      if (Math.abs(Value2_prev) === highestPrev) {
-        if (Value2_prev < 0 && Value2 > Value2_prev) data.exBull = Value2_prev + zeroValue;
-        if (Value2_prev > 0 && Value2 < Value2_prev) data.exBear = Value2_prev + zeroValue;
+    const prevIndex = i - 1;
+    if (prevIndex >= 0) {
+      const start = Math.max(0, prevIndex - lookback + 1);
+      const window = value3Arr.slice(start, prevIndex + 1).filter(v => v != null);
+      const Value2_prev = value2Arr[prevIndex];
+      if (window.length && Value2_prev != null) {
+        const highestPrev = Math.max(...window);
+        if (value3Arr[prevIndex] === highestPrev) {
+          if (Value2_prev < 0 && Value2 > Value2_prev) results[prevIndex].exBull = Value2_prev + zeroValue;
+          if (Value2_prev > 0 && Value2 < Value2_prev) results[prevIndex].exBear = Value2_prev + zeroValue;
+        }
       }
     }
 
     prevVal = Value2;
-    return data;
-  });
+  }
+
+  return results;
 }
 
 
@@ -132,124 +157,185 @@ function highest(arr) {
 
 // ---------- Core computation ----------
 export function calculateBetterProAm(candles, config = {}) {
-  const Var2 = 20; // Lookback
+  const Var2 = 20;
+  const RAMBO = config.RAMBO !== undefined ? config.RAMBO : true;
+  const NoD = config.NoD !== undefined ? config.NoD : true;
+  const ProfitTake = config.ProfitTake !== undefined ? config.ProfitTake : true;
+  const StoppingVol = config.StoppingVol !== undefined ? config.StoppingVol : true;
   const Space = config.Space !== undefined ? config.Space : true;
   const SpaceMulti = config.SpaceMulti !== undefined ? config.SpaceMulti : 1;
   const TextSpaceMulti = config.TextSpaceMulti !== undefined ? config.TextSpaceMulti : 0.75;
 
   const signals = [];
+  const ranges = candles.map(c => (c?.high ?? 0) - (c?.low ?? 0));
+  const var1Arr = candles.map(c => Math.abs(c?.volume ?? 0));
 
-  const Var1 = Array(candles.length).fill(0);
-  const Range = candles.map(c => c.high - c.low);
+  let Var3 = 0;
 
-  let Var4 = 0;
-  let Var5 = 0;
-  const Var6Arr = Array(candles.length).fill(0);
-
-  for (let i = Var2; i < candles.length; i++) {
-    const windowCandles = candles.slice(i - Var2 + 1, i + 1);
-    const avgVol = average(windowCandles.map(c => c.volume));
-    const avgRange = average(Range.slice(i - Var2 + 1, i + 1));
-    Var1[i] = Range[i] / avgRange;
-    Var6Arr[i] = avgRange * TextSpaceMulti;
-
+  for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
-    const prev1 = candles[i - 1];
-    const prev2 = candles[i - 2];
+    if (!c) continue;
 
-    // ==========================
-    // RAMBO
-    // ==========================
-    const lowestLow = lowest(candles.slice(i - Var2 + 1, i).map(c => c.low));
-    const highestHigh = highest(candles.slice(i - Var2 + 1, i).map(c => c.high));
+    const Var1 = var1Arr[i];
+    const Range = ranges[i];
 
-    if (c.low <= lowestLow) {
-      Var4 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "RamboBull" });        //RamboBull
-    }
-    if (c.high >= highestHigh) {
-      Var5 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "RamboBear" });        //RamboBear
+    if (i >= 1) {
+      const startPrev = Math.max(0, i - Var2);
+      const prevSlice = candles.slice(startPrev, i);
+      if (prevSlice.length) {
+        const prevLow = Math.min(...prevSlice.map(x => x.low ?? 0));
+        const prevHigh = Math.max(...prevSlice.map(x => x.high ?? 0));
+        if (c.low < prevLow) Var3 = 1;
+        if (c.high > prevHigh) Var3 = -1;
+      }
     }
 
-    // ==========================
-    // NoD / NoS
-    // ==========================
-    const Var3 =
-      c.low < lowest(candles.slice(i - Var2 + 1, i).map(c => c.low))
-        ? 1
-        : c.high > highest(candles.slice(i - Var2 + 1, i).map(c => c.high))
-        ? -1
-        : 0;
+    const start = Math.max(0, i - Var2 + 1);
+    const volWindow = var1Arr.slice(start, i + 1);
+    if (!volWindow.length || Math.max(...volWindow) === 0) continue;
 
-    const Var13 =
-      c.close >= c.low + 0.4 * Range[i] &&
-      c.low < prev1.low &&
-      c.low < prev2.low &&
-      Var1[i] < Var1[i - 1] &&
-      Var1[i] < Var1[i - 2] &&
-      (Range[i] < Range[i - 1] || Range[i] < Range[i - 2]) &&
+    const rangeWindow = ranges.slice(start, i + 1);
+    const avgRange = average(rangeWindow);
+    const Var6 = avgRange * TextSpaceMulti;
+
+    let Var4 = 0;
+    let Var5 = 0;
+
+    if (Space) {
+      const Var7 = avgRange * SpaceMulti;
+      void Var7;
+    }
+
+    const sorted = [...volWindow].sort((a, b) => a - b);
+    const min1 = sorted[0];
+    const min2 = sorted.length > 1 ? sorted[1] : null;
+    const Var8 = Var1 === min1;
+    const Var9 = min2 !== null && Var1 === min2;
+
+    if (RAMBO && (Var8 || Var9)) {
+      const lowWindow = candles.slice(start, i + 1).map(x => x.low ?? 0);
+      const highWindow = candles.slice(start, i + 1).map(x => x.high ?? 0);
+      if (lowWindow.length && c.low === Math.min(...lowWindow)) {
+        Var4 += Var6;
+        signals.push({ time: c.time, flag: "RamboBull" });
+      }
+      if (highWindow.length && c.high === Math.max(...highWindow)) {
+        Var5 += Var6;
+        signals.push({ time: c.time, flag: "RamboBear" });
+      }
+    }
+
+    const c1 = candles[i - 1];
+    const c2 = candles[i - 2];
+    const Range1 = ranges[i - 1];
+    const Range2 = ranges[i - 2];
+    const Var1_1 = var1Arr[i - 1];
+    const Var1_2 = var1Arr[i - 2];
+
+    const Var13 = i >= 2 &&
+      c1 && c2 &&
+      c.close >= c.low + 0.4 * Range &&
+      c.low < c1.low &&
+      c.low < c2.low &&
+      Var1 < Var1_1 &&
+      Var1 < Var1_2 &&
+      (Range < Range1 || Range < Range2) &&
       Var3 === 1;
 
-    const Var14 =
-      c.close <= c.high - 0.4 * Range[i] &&
-      c.high > prev1.high &&
-      c.high > prev2.high &&
-      Var1[i] < Var1[i - 1] &&
-      Var1[i] < Var1[i - 2] &&
-      (Range[i] < Range[i - 1] || Range[i] < Range[i - 2]) &&
+    const Var14 = i >= 2 &&
+      c1 && c2 &&
+      c.close <= c.high - 0.4 * Range &&
+      c.high > c1.high &&
+      c.high > c2.high &&
+      Var1 < Var1_1 &&
+      Var1 < Var1_2 &&
+      (Range < Range1 || Range < Range2) &&
       Var3 === -1;
 
-    if (Var13) {
-      Var4 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "NoS" });
-    }
-    if (Var14) {
-      Var5 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "NoD" });
+    if (NoD) {
+      if (Var13) {
+        Var4 += Var6;
+        signals.push({ time: c.time, flag: "NoS" });
+      }
+      if (Var14) {
+        Var5 += Var6;
+        signals.push({ time: c.time, flag: "NoD" });
+      }
     }
 
-    // ==========================
-    // Profit Take (PT)
-    // ==========================
-    const Var15 =
-      c.close >= c.low + 0.4 * Range[i] &&
-      c.close <= c.low + 0.6 * Range[i] &&
-      c.close < prev1.close &&
-      c.low < prev1.low &&
-      Var1[i] > Var1[i - 1] &&
+    const Var15 = i >= 1 &&
+      c1 &&
+      c.close >= c.low + 0.4 * Range &&
+      c.close <= c.low + 0.6 * Range &&
+      c.close < c1.close &&
+      c.low < c1.low &&
+      Var1 > Var1_1 &&
       Var3 === 1;
 
-    const Var16 =
-      c.close >= c.low + 0.4 * Range[i] &&
-      c.close <= c.low + 0.6 * Range[i] &&
-      c.close > prev1.close &&
-      c.high > prev1.high &&
-      Var1[i] > Var1[i - 1] &&
+    const Var16 = i >= 1 &&
+      c1 &&
+      c.close >= c.low + 0.4 * Range &&
+      c.close <= c.low + 0.6 * Range &&
+      c.close > c1.close &&
+      c.high > c1.high &&
+      Var1 > Var1_1 &&
       Var3 === -1;
 
-    if (Var15) {
-      Var4 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "PTBull" });
-    }
-    if (Var16) {
-      Var5 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "PTBear" });
+    if (ProfitTake) {
+      if (Var15) {
+        Var4 += Var6;
+        signals.push({ time: c.time, flag: "PTBull" });
+      }
+      if (Var16) {
+        Var5 += Var6;
+        signals.push({ time: c.time, flag: "PTBear" });
+      }
     }
 
-    // ==========================
-    // Stopping Volume
-    // ==========================
-    const Var17 = Range[i] < Range[i - 1] && Var1[i] > Var1[i - 1] && c.high < prev1.low;
-    const Var18 = Range[i] < Range[i - 1] && Var1[i] > Var1[i - 1] && c.low > prev1.high;
+    const Var17 = i >= 1 &&
+      Range < Range1 &&
+      Var1 > Var1_1 &&
+      c.high < c1.low;
+    const Var18 = i >= 1 &&
+      Range < Range1 &&
+      Var1 > Var1_1 &&
+      c.low > c1.high;
 
-    if (Var17) {
-      Var4 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "StStar" });
+    if (StoppingVol) {
+      if (Var17) {
+        Var4 += Var6;
+        signals.push({ time: c.time, flag: "StStarBull" });
+      }
+      if (Var18) {
+        Var5 += Var6;
+        signals.push({ time: c.time, flag: "StStarBear" });
+      }
     }
-    if (Var18) {
-      Var5 += Var6Arr[i];
-      signals.push({ time: c.time, flag: "StStar" });
+
+    const Var19 = i >= 2 &&
+      Range < Range1 &&
+      Range < Range2 &&
+      Var1 > Var1_1 &&
+      Var1 > Var1_2 &&
+      c.low < c1.low &&
+      Var3 === 1;
+    const Var20 = i >= 2 &&
+      Range < Range1 &&
+      Range < Range2 &&
+      Var1 > Var1_1 &&
+      Var1 > Var1_2 &&
+      c.high > c1.high &&
+      Var3 === -1;
+
+    if (StoppingVol) {
+      if (Var19 && !Var17) {
+        Var4 += Var6;
+        signals.push({ time: c.time, flag: "StBull" });
+      }
+      if (Var20 && !Var18) {
+        Var5 += Var6;
+        signals.push({ time: c.time, flag: "StBear" });
+      }
     }
   }
 
@@ -380,6 +466,96 @@ function calculateBetterProAm_Old(candles, options = {}) {
     if (Var18) console.log('StoppingVol bear at index', i);
   }
   return candles.map((c,i)=>({ time: c.time, signals: signalsPerCandle[i] }));
+}
+
+function calculateBetterSineSR_EL(candles) {
+  const n = candles.length;
+  const data = [];
+
+  let Var1 = 0, Var2 = 0, Var3 = 0;
+  let Var5 = false, Var6 = false, Var9 = false, Var10 = false, Var11 = false, Var12 = false;
+  let Var7 = candles[0]?.close ?? 0;
+  let Var8 = candles[0]?.close ?? 0;
+  let Var13 = 1;
+
+  let prevVar2 = null;
+  let prevVar3 = null;
+  let prevVar13 = Var13;
+
+  const minMove = 1;
+  const priceScale = 1;
+
+  for (let i = 0; i < n; i++) {
+    const c = candles[i];
+    const prevC = candles[i - 1] || c;
+    const prevLow = prevC.low ?? c.low;
+    const prevHigh = prevC.high ?? c.high;
+
+    const point = {
+      time: c.time,
+      support: null,
+      resistance: null,
+      breakOut: null,
+      pullBack: null,
+      endOfTrend: null,
+    };
+
+    Var1 = (c.high + c.low) / 2;
+    Var2 = Math.sin(Var1) * 100;
+    Var3 = Math.sin(Var1 + Math.PI / 4) * 100;
+    const Var4 = minMove / priceScale;
+
+    const crossOver = prevVar3 !== null && prevVar2 !== null && prevVar3 <= prevVar2 && Var3 > Var2;
+    const crossUnder = prevVar3 !== null && prevVar2 !== null && prevVar3 >= prevVar2 && Var3 < Var2;
+    if (crossOver && !Var5) Var6 = true;
+    if (crossUnder && !Var6) Var5 = true;
+
+    if (Var3 > Var2 && Var6 && c.high > prevHigh) {
+      Var7 = Var8;
+      Var8 = Math.min(c.low, prevLow) - Var4;
+      Var6 = false; Var9 = true; Var10 = false; Var11 = true;
+      if ((Var13 === 2 || Var13 === -4) && Var8 >= Var7) Var13 = 3;
+      if (Var13 === -3 && Var8 <= Var7) Var13 = -5;
+      if (Var13 !== 3 && Var13 !== -5) Var13 = -1;
+    }
+
+    if (Var3 < Var2 && Var5 && c.low < prevLow) {
+      Var7 = Var8;
+      Var8 = Math.max(c.high, prevHigh) + Var4;
+      Var5 = false; Var10 = true; Var9 = false; Var12 = true;
+      if ((Var13 === -2 || Var13 === 4) && Var8 <= Var7) Var13 = -3;
+      if (Var13 === 3 && Var8 >= Var7) Var13 = 5;
+      if (Var13 !== -3 && Var13 !== 5) Var13 = 1;
+    }
+
+    if (Var9) point.support = Var8;
+    if (Var10) point.resistance = Var8;
+
+    if (Var9 && c.close < Var8 && Var3 > 0 && Var11) {
+      if (Var13 === 3) Var13 = 4; else Var13 = -2;
+      Var11 = false;
+      point.breakOut = c.low;
+    }
+
+    if (Var10 && c.close > Var8 && Var3 < 0 && Var12) {
+      if (Var13 === -3) Var13 = -4; else Var13 = 2;
+      Var12 = false;
+      point.breakOut = c.high;
+    }
+
+    if (Var13 === 3 && prevVar13 !== 3) point.pullBack = Var8;
+    if (Var13 === -3 && prevVar13 !== -3) point.pullBack = Var8;
+    if (Var13 === 5 && prevVar13 !== 5) point.endOfTrend = Var8;
+    if (Var13 === -5 && prevVar13 !== -5) point.endOfTrend = Var8;
+
+    data.push(point);
+
+    prevVar2 = Var2;
+    prevVar3 = Var3;
+    prevVar13 = Var13;
+  }
+
+  return data;
 }
 
 function calculateBetterSineSR(candles) {
@@ -588,14 +764,22 @@ export default function IndicatorChart({ candles, offset, spacing, scale , showB
         const candlePixelHeight = Math.max(1, Math.abs(priceToY(c.high) - priceToY(c.low)));
         const lineHeight = Math.max(12, Math.min(20, Math.round(candlePixelHeight * 0.35))); // 12~20px 사이
 
-        const bullish = arr.filter(s => ["RamboBull", "NoS", "PTBull", "St"].includes(s.flag));
-        const bearish = arr.filter(s => ["RamboBear", "NoD", "PTBear", "StStar"].includes(s.flag));
+        const bullishFlags = ["RamboBull", "NoS", "PTBull", "StBull", "StStarBull"];
+        const bearishFlags = ["RamboBear", "NoD", "PTBear", "StBear", "StStarBear"];
+        const bullish = arr.filter(s => bullishFlags.includes(s.flag));
+        const bearish = arr.filter(s => bearishFlags.includes(s.flag));
         const others = arr.filter(s => !bullish.includes(s) && !bearish.includes(s));
 
         bullish.forEach((signal, i) => {
             const yBase = priceToY(c.low) + 5;
             const y = yBase + i * lineHeight;
-            const text = signal.flag === "RamboBull" ? "RB" : signal.flag;
+            const text = signal.flag === "RamboBull"
+              ? "RB"
+              : signal.flag === "StBull"
+              ? "St"
+              : signal.flag === "StStarBull"
+              ? "St*"
+              : signal.flag;
             ctx.fillStyle = bullishCss;
             ctx.fillText(text, x, y);
         });
@@ -603,7 +787,13 @@ export default function IndicatorChart({ candles, offset, spacing, scale , showB
         bearish.forEach((signal, i) => {
             const yBase = priceToY(c.high) - 5;
             const y = yBase - i * lineHeight;
-            const text = signal.flag === "RamboBear" ? "RB" : signal.flag;
+            const text = signal.flag === "RamboBear"
+              ? "RB"
+              : signal.flag === "StBear"
+              ? "St"
+              : signal.flag === "StStarBear"
+              ? "St*"
+              : signal.flag;
             ctx.fillStyle = bearishCss;
             ctx.fillText(text, x, y);
         });
@@ -681,7 +871,7 @@ export default function IndicatorChart({ candles, offset, spacing, scale , showB
     // ==========================
     if (showSineSR)
     {
-        const srData = calculateBetterSineSR(candles);
+        const srData = calculateBetterSineSR_EL(candles);
 
         const drawnSupportLevels = new Set();
         const drawnResistanceLevels = new Set();

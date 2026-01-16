@@ -37,6 +37,15 @@ function calculateBetterMomentum(candles, zeroValue = 50, lookback = 60) {
   const closes = candles.map(c => (c?.close ?? 0));
   const anyIndicator = rsi(closes, 5);
 
+  const results = candles.map(c => ({
+    time: c?.time ?? null,
+    momentum: null,
+    bullDiv: null,
+    bearDiv: null,
+    exBull: null,
+    exBear: null,
+  }));
+
   let HH = 0, LL = 0;
   let CountH = 0, CountL = 0;
 
@@ -48,67 +57,83 @@ function calculateBetterMomentum(candles, zeroValue = 50, lookback = 60) {
 
   let prevVal = null;
 
-  return candles.map((c, i) => {
-    if (!c || c.time == null) return { time: null, momentum: null, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
+  const value2Arr = Array(candles.length).fill(null);
+  const value3Arr = Array(candles.length).fill(null);
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    if (!c || c.time == null) continue;
 
     const val = anyIndicator[i];
-    if (val == null) return { time: c.time, momentum: null, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
-
-    const data = { time: c.time, momentum: val, bullDiv: null, bearDiv: null, exBull: null, exBear: null };
+    if (val == null) continue;
 
     const Value2 = val - zeroValue;
-    data.momentum = Value2 + zeroValue;
+    value2Arr[i] = Value2;
+    value3Arr[i] = Math.abs(Value2);
+    results[i].momentum = Value2 + zeroValue;
 
-    // --- HH / LL ---
-    if (prevVal !== null) {
-      if ((prevVal >= 0 && Value2 < 0) || (prevVal >= LL / 2 && Value2 < LL / 2)) LL = Value2;
-      if ((prevVal <= 0 && Value2 > 0) || (prevVal <= HH / 2 && Value2 > HH / 2)) HH = Value2;
-    }
+    const crossBelowZero = prevVal !== null && prevVal >= 0 && Value2 < 0;
+    const crossBelowLL2 = prevVal !== null && prevVal >= LL / 2 && Value2 < LL / 2;
+    if (crossBelowZero || crossBelowLL2) LL = Value2;
     if (Value2 < 0 && Value2 <= LL) { LL = Value2; CountL = 0; }
+
+    const crossAboveZero = prevVal !== null && prevVal <= 0 && Value2 > 0;
+    const crossAboveHH2 = prevVal !== null && prevVal <= HH / 2 && Value2 > HH / 2;
+    if (crossAboveZero || crossAboveHH2) HH = Value2;
     if (Value2 > 0 && Value2 >= HH) { HH = Value2; CountH = 0; }
 
-    CountL++; CountH++;
+    CountL += 1;
+    CountH += 1;
 
-    // --- OscLow / PriceLow ---
-    if (prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2) {
+    const crossAboveLL2Now = prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2;
+    const crossBelowHH2Now = prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2;
+
+    if (crossAboveLL2Now) {
       OscLowOlder = OscLowOld; OscLowOld = OscLow; OscLow = LL;
       PriceLowOlder = PriceLowOld; PriceLowOld = PriceLow;
       const idxLow = i - (CountL - 1);
       if (idxLow >= 0 && candles[idxLow]) PriceLow = candles[idxLow].low ?? 0;
     }
 
-    // --- OscHigh / PriceHigh ---
-    if (prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2) {
+    if (crossBelowHH2Now) {
       OscHighOlder = OscHighOld; OscHighOld = OscHigh; OscHigh = HH;
       PriceHighOlder = PriceHighOld; PriceHighOld = PriceHigh;
       const idxHigh = i - (CountH - 1);
       if (idxHigh >= 0 && candles[idxHigh]) PriceHigh = candles[idxHigh].high ?? 0;
     }
 
-    // --- Divergence ---
     const Condition1 = OscLow > OscLowOld && PriceLow <= PriceLowOld;
     const Condition2 = OscLow > OscLowOlder && PriceLow <= PriceLowOlder;
     const Condition3 = OscHigh < OscHighOld && PriceHigh >= PriceHighOld;
     const Condition4 = OscHigh < OscHighOlder && PriceHigh >= PriceHighOlder;
 
-    if (prevVal !== null && prevVal <= LL / 2 && Value2 > LL / 2 && (Condition1 || Condition2)) data.bullDiv = LL + zeroValue;
-    if (prevVal !== null && prevVal >= HH / 2 && Value2 < HH / 2 && (Condition3 || Condition4)) data.bearDiv = HH + zeroValue;
+    if (crossAboveLL2Now && (Condition1 || Condition2)) {
+      const bullIndex = i - (CountL - 1);
+      if (bullIndex >= 0 && results[bullIndex]) results[bullIndex].bullDiv = LL + zeroValue;
+    }
+    if (crossBelowHH2Now && (Condition3 || Condition4)) {
+      const bearIndex = i - (CountH - 1);
+      if (bearIndex >= 0 && results[bearIndex]) results[bearIndex].bearDiv = HH + zeroValue;
+    }
 
-    // --- Exhaustion ---
-    if (i >= lookback) {
-      const Value2_prev = anyIndicator[i - 1] - zeroValue;
-      const lookbackSlice = anyIndicator.slice(i - lookback, i).map(v => Math.abs(v - zeroValue));
-      const highestPrev = Math.max(...lookbackSlice);
-
-      if (Math.abs(Value2_prev) === highestPrev) {
-        if (Value2_prev < 0 && Value2 > Value2_prev) data.exBull = Value2_prev + zeroValue;
-        if (Value2_prev > 0 && Value2 < Value2_prev) data.exBear = Value2_prev + zeroValue;
+    const prevIndex = i - 1;
+    if (prevIndex >= 0) {
+      const start = Math.max(0, prevIndex - lookback + 1);
+      const window = value3Arr.slice(start, prevIndex + 1).filter(v => v != null);
+      const Value2_prev = value2Arr[prevIndex];
+      if (window.length && Value2_prev != null) {
+        const highestPrev = Math.max(...window);
+        if (value3Arr[prevIndex] === highestPrev) {
+          if (Value2_prev < 0 && Value2 > Value2_prev) results[prevIndex].exBull = Value2_prev + zeroValue;
+          if (Value2_prev > 0 && Value2 < Value2_prev) results[prevIndex].exBear = Value2_prev + zeroValue;
+        }
       }
     }
 
     prevVal = Value2;
-    return data;
-  });
+  }
+
+  return results;
 }
 
 
@@ -119,12 +144,12 @@ export default function SineChart({ candles, offset, spacing, scale, indicatorTy
 
     const indicatorLegends = {
         '_Better Mom Any': [
-            { text: 'Momentum', color: 'cyan' },
-            { text: 'Zero Line', color: 'white' },
-            { text: 'Bull Div', color: 'red' },
-            { text: 'Bear Div', color: 'white' },
-            { text: 'Exhaust Bull', color: 'cyan' },
-            { text: 'Exhaust Bear', color: 'cyan' },
+            { text: 'Momentum (Line)', color: '#39f7ff', shape: 'line' },
+            { text: 'Zero Line', color: '#e6e8ee', shape: 'dash' },
+            { text: 'Bull Div', color: '#ff4d4d', shape: 'triangle-up' },
+            { text: 'Bear Div', color: '#ffffff', shape: 'triangle-down' },
+            { text: 'Exhaust Bull', color: '#35d1ff', shape: 'diamond' },
+            { text: 'Exhaust Bear', color: '#c77dff', shape: 'diamond' },
         ],
         '_Better Pro Am': [
             // momentum: 'cyan', 
@@ -157,7 +182,9 @@ export default function SineChart({ candles, offset, spacing, scale, indicatorTy
       case '_Better Mom Any':
         return { 
           func: (c) => calculateBetterMomentum(c), 
-          colorConfig: { momentum: 'cyan', bullDiv: 'red', bearDiv: 'white', exBull: 'cyan', exBear: 'cyan' }
+          zeroValue: 50,
+          zeroColor: '#e6e8ee',
+          colorConfig: { momentum: '#39f7ff', bullDiv: '#ff4d4d', bearDiv: '#ffffff', exBull: '#35d1ff', exBear: '#c77dff' }
         };
       default: 
         return null;
@@ -181,20 +208,15 @@ const drawIndicator = () => {
     if (!config) return;
     const data = config.func(candles);
     const color = config.colorConfig;
+    const zeroValue = config.zeroValue;
+    const zeroColor = config.zeroColor;
 
     // max/min 계산 (모든 신호 포함)
-    let allValues = [];
-    data.forEach(d => {
-        if (d.momentum!=null) allValues.push(d.momentum);
-        if (d.bullDiv!=null) allValues.push(d.bullDiv);
-        if (d.bearDiv!=null) allValues.push(d.bearDiv);
-        if (d.exBull!=null) allValues.push(d.exBull);
-        if (d.exBear!=null) allValues.push(d.exBear);
-    });
-    if (!allValues.length) return;
+    const momentumValues = data.map(d => d.momentum).filter(v => v != null);
+    if (!momentumValues.length) return;
 
-    const max = Math.max(...allValues);
-    const min = Math.min(...allValues);
+    const max = Math.max(...momentumValues);
+    const min = Math.min(...momentumValues);
     const valueToY = v => margin + (max - v)/(max - min)*innerHeight;
     const indexToX = i => margin + (i - offset.x)*spacing;
 
@@ -222,6 +244,18 @@ const drawIndicator = () => {
     }
 
     // Momentum 라인
+    if (zeroValue != null) {
+        const yZero = valueToY(zeroValue);
+        ctx.save();
+        ctx.strokeStyle = zeroColor || '#e6e8ee';
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(margin, yZero);
+        ctx.lineTo(width - margin, yZero);
+        ctx.stroke();
+        ctx.restore();
+    }
     ctx.beginPath();
     ctx.strokeStyle = color.momentum;
     data.forEach((d,i)=>{
@@ -237,35 +271,53 @@ const drawIndicator = () => {
       const x = indexToX(i);
 
       if (d.bullDiv != null){ 
+          const y = valueToY(d.bullDiv);
           ctx.fillStyle = color.bullDiv; 
           ctx.beginPath(); 
-          ctx.arc(x, valueToY(d.bullDiv), r, 0, 2*Math.PI); 
+          ctx.moveTo(x, y - r * 2);
+          ctx.lineTo(x + r * 2, y + r * 2);
+          ctx.lineTo(x - r * 2, y + r * 2);
+          ctx.closePath();
           ctx.fill(); 
       }
       if (d.bearDiv != null){ 
+          const y = valueToY(d.bearDiv);
           ctx.fillStyle = color.bearDiv; 
           ctx.beginPath(); 
-          ctx.arc(x, valueToY(d.bearDiv), r, 0, 2*Math.PI); 
+          ctx.moveTo(x - r * 2, y - r * 2);
+          ctx.lineTo(x + r * 2, y - r * 2);
+          ctx.lineTo(x, y + r * 2);
+          ctx.closePath();
           ctx.fill(); 
       }
       if (d.exBull != null){ 
+          const y = valueToY(d.exBull);
           ctx.fillStyle = color.exBull; 
           ctx.beginPath(); 
-          ctx.arc(x, valueToY(d.exBull), r*3, 0, 2*Math.PI); 
+          ctx.moveTo(x, y - r * 3);
+          ctx.lineTo(x + r * 2, y);
+          ctx.lineTo(x, y + r * 3);
+          ctx.lineTo(x - r * 2, y);
+          ctx.closePath();
           ctx.fill(); 
       }
       if (d.exBear != null){ 
+          const y = valueToY(d.exBear);
           ctx.fillStyle = color.exBear; 
           ctx.beginPath(); 
-          ctx.arc(x, valueToY(d.exBear), r*3, 0, 2*Math.PI); 
+          ctx.moveTo(x, y - r * 3);
+          ctx.lineTo(x + r * 2, y);
+          ctx.lineTo(x, y + r * 3);
+          ctx.lineTo(x - r * 2, y);
+          ctx.closePath();
           ctx.fill(); 
       }
   });
 
     // 기존 drawIndicator 마지막 부분에서 alerts 대신 legend 사용
     const legends = indicatorLegends[indicatorType] || [];
-    const boxWidth = 140;
-    const boxHeight = legends.length * 16 + 10;
+    const boxWidth = 175;
+    const boxHeight = legends.length * 18 + 12;
     const boxX = width - margin - boxWidth;
     const boxY = margin;
 
@@ -274,13 +326,55 @@ const drawIndicator = () => {
 
     ctx.font = '12px sans-serif';
     legends.forEach((a, idx) => {
+        const legendX = boxX + 12;
+        const legendY = boxY + 14 + idx*18;
+        ctx.strokeStyle = a.color;
         ctx.fillStyle = a.color;
-        ctx.beginPath();
-        ctx.arc(boxX + 8, boxY + 12 + idx*16, 5, 0, 2*Math.PI);
-        ctx.fill();
+
+        if (a.shape === 'line') {
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(legendX - 4, legendY);
+            ctx.lineTo(legendX + 10, legendY);
+            ctx.stroke();
+        } else if (a.shape === 'dash') {
+            ctx.setLineDash([4, 3]);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(legendX - 4, legendY);
+            ctx.lineTo(legendX + 10, legendY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        } else if (a.shape === 'triangle-up') {
+            ctx.beginPath();
+            ctx.moveTo(legendX + 2, legendY - 6);
+            ctx.lineTo(legendX + 8, legendY + 4);
+            ctx.lineTo(legendX - 4, legendY + 4);
+            ctx.closePath();
+            ctx.fill();
+        } else if (a.shape === 'triangle-down') {
+            ctx.beginPath();
+            ctx.moveTo(legendX - 4, legendY - 4);
+            ctx.lineTo(legendX + 8, legendY - 4);
+            ctx.lineTo(legendX + 2, legendY + 6);
+            ctx.closePath();
+            ctx.fill();
+        } else if (a.shape === 'diamond') {
+            ctx.beginPath();
+            ctx.moveTo(legendX + 2, legendY - 6);
+            ctx.lineTo(legendX + 8, legendY);
+            ctx.lineTo(legendX + 2, legendY + 6);
+            ctx.lineTo(legendX - 4, legendY);
+            ctx.closePath();
+            ctx.fill();
+        } else {
+            ctx.beginPath();
+            ctx.arc(legendX + 2, legendY, 4, 0, 2*Math.PI);
+            ctx.fill();
+        }
 
         ctx.fillStyle = 'white';
-        ctx.fillText(a.text, boxX + 20, boxY + 16 + idx*16);
+        ctx.fillText(a.text, boxX + 28, legendY + 4);
     });
 };
 

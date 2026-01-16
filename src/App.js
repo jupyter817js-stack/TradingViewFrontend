@@ -16,6 +16,7 @@ export default function App() {
   const [scale, setScale] = useState(1);
   const [isMouseDown, setIsMouseDown] = useState(false);
   const [lastPosition, setLastPosition] = useState(null);
+  const [displayStyle, setDisplayStyle] = useState("candles");
 
   const [showBetterMom, setShowBetterMom] = useState(true);
   const [showProAm, setShowProAm] = useState(true);
@@ -339,6 +340,19 @@ export default function App() {
               </select>
             </div>
           </div>
+          <div className="control">
+            <label className="control-label" htmlFor="display-style">Display</label>
+            <div className="select-wrap">
+              <select
+                id="display-style"
+                value={displayStyle}
+                onChange={e => setDisplayStyle(e.target.value)}
+              >
+                <option value="candles">Candles</option>
+                <option value="ohlc">OHLC</option>
+              </select>
+            </div>
+          </div>
 
           <div className="control">
             <span className="control-label">Indicators</span>
@@ -376,7 +390,13 @@ export default function App() {
 
         <section className="chart-card">
           <div ref={containerRef} className="chart-stage">
-            <CandleChart candles={candles} offset={offset} spacing={spacing} scale={scale} />
+            <CandleChart
+              candles={candles}
+              offset={offset}
+              spacing={spacing}
+              scale={scale}
+              displayStyle={displayStyle}
+            />
             <OverlayCanvas candles={candles} cursor={cursor} offset={offset} spacing={spacing} scale={scale} />
             <IndicatorChart
               candles={candles}

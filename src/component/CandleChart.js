@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { calculateBetterProAm } from "../Utils/calculateBetterProAm";
 
-export default function CandleChart({ candles, offset, spacing, scale }) {
+export default function CandleChart({ candles, offset, spacing, scale, displayStyle = "candles" }) {
     const canvasRef = useRef(null);
     const drawChart = () => {
         const canvas = canvasRef.current;
@@ -66,6 +66,8 @@ export default function CandleChart({ candles, offset, spacing, scale }) {
 
             // console.log(proAmData);
 
+        const bodyWidth = Math.max(4, Math.min(16, spacing * 0.8));
+
         // candle
         visibleCandles.forEach((c, i) => {
             const x = indexToX(leftIndex + i);
@@ -78,7 +80,6 @@ export default function CandleChart({ candles, offset, spacing, scale }) {
             let color;
             const candleTime = Number(c.time);
             const proAm = proAmData.find(s => Number(s.time) === candleTime);
-            // console.log(proAm.flag);
             if (proAm)
             {
                 if ((proAm.flag === "ProSell") || (proAm.flag === "ProBuy"))
@@ -89,25 +90,42 @@ export default function CandleChart({ candles, offset, spacing, scale }) {
             else
                 color = c.open > c.close ? 'red' : c.open < c.close ? 'lime' : 'gray';
 
-            ctx.strokeStyle = color;
+            if (displayStyle === "ohlc") {
+                ctx.strokeStyle = color;
 
-            // high-low line
+                // high-low line
+                ctx.beginPath();
+                ctx.moveTo(x, yHigh);
+                ctx.lineTo(x, yLow);
+                ctx.stroke();
+
+                // open
+                ctx.beginPath();
+                ctx.moveTo(x - 4, yOpen);
+                ctx.lineTo(x, yOpen);
+                ctx.stroke();
+
+                // close
+                ctx.beginPath();
+                ctx.moveTo(x, yClose);
+                ctx.lineTo(x + 4, yClose);
+                ctx.stroke();
+                return;
+            }
+
+            ctx.strokeStyle = color;
+            ctx.fillStyle = color;
+
+            // wick
             ctx.beginPath();
             ctx.moveTo(x, yHigh);
             ctx.lineTo(x, yLow);
             ctx.stroke();
 
-            // open
-            ctx.beginPath();
-            ctx.moveTo(x - 4, yOpen);
-            ctx.lineTo(x, yOpen);
-            ctx.stroke();
-
-            // close
-            ctx.beginPath();
-            ctx.moveTo(x, yClose);
-            ctx.lineTo(x + 4, yClose);
-            ctx.stroke();
+            const bodyTop = Math.min(yOpen, yClose);
+            const bodyBottom = Math.max(yOpen, yClose);
+            const bodyHeight = Math.max(1, bodyBottom - bodyTop);
+            ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
         });
 
     };
@@ -129,11 +147,11 @@ export default function CandleChart({ candles, offset, spacing, scale }) {
         window.addEventListener('resize', resize);
         resize();
         return () => window.removeEventListener('resize', resize);
-    }, [candles, offset, spacing, scale]);
+    }, [candles, offset, spacing, scale, displayStyle]);
 
     useEffect(() => {
         drawChart();
-    }, [candles, offset, spacing, scale]);
+    }, [candles, offset, spacing, scale, displayStyle]);
 
     return <canvas ref={canvasRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '70%' }} />;
 }
