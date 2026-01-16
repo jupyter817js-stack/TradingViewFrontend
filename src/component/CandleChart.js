@@ -128,6 +128,27 @@ export default function CandleChart({ candles, offset, spacing, scale, displaySt
             ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
         });
 
+        const legendItems = [
+            { label: "Bull Candle", color: "lime" },
+            { label: "Bear Candle", color: "red" },
+            { label: "Pro Signal", color: "blue" },
+            { label: "Am Signal", color: "yellow" },
+        ];
+        const legendX = margin + 6;
+        const legendY = margin + 6;
+        const legendWidth = 150;
+        const legendHeight = legendItems.length * 16 + 10;
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.fillRect(legendX, legendY, legendWidth, legendHeight);
+        ctx.font = "12px Arial";
+        legendItems.forEach((item, idx) => {
+            const y = legendY + 8 + idx * 16;
+            ctx.fillStyle = item.color;
+            ctx.fillRect(legendX + 8, y - 6, 10, 10);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillText(item.label, legendX + 24, y + 2);
+        });
+
     };
 
     useEffect(() => {

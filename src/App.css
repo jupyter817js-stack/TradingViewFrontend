@@ -83,6 +83,20 @@
   border-color: #2b3246;
 }
 
+.pill-action {
+  background: transparent;
+  color: #a8b2c8;
+  border-color: #33405a;
+  cursor: pointer;
+  transition: border-color 200ms ease, color 200ms ease, box-shadow 200ms ease;
+}
+
+.pill-action:hover {
+  color: #e0e6f5;
+  border-color: #4f6aff;
+  box-shadow: 0 0 0 3px #4f6aff22;
+}
+
 .controls-card {
   display: flex;
   flex-wrap: wrap;

@@ -17,6 +17,7 @@ export default function App() {
   const [isMouseDown, setIsMouseDown] = useState(false);
   const [lastPosition, setLastPosition] = useState(null);
   const [displayStyle, setDisplayStyle] = useState("candles");
+  const isMouseDownRef = useRef(false);
 
   const [showBetterMom, setShowBetterMom] = useState(true);
   const [showProAm, setShowProAm] = useState(true);
@@ -34,6 +35,7 @@ export default function App() {
 
   useEffect(() => { newestTimeRef.current = newestTime; }, [newestTime]);
   useEffect(() => { oldestTimeRef.current = oldestTime; }, [oldestTime]);
+  useEffect(() => { isMouseDownRef.current = isMouseDown; }, [isMouseDown]);
 
   const pixelPerCandle = () => spacing * scale * 0.2; // Helper function for pixel per candle
 
@@ -66,6 +68,18 @@ export default function App() {
     const num = Number(value);
     if (!Number.isFinite(num)) return null;
     return num < 1e12 ? num * 1000 : num;
+  };
+
+  const getVisibleCount = () => {
+    const container = containerRef.current;
+    if (!container) return 0;
+    return Math.max(1, Math.floor(container.clientWidth / spacing));
+  };
+
+  const clampOffset = (value, candleCount, rightPad = 0) => {
+    const visibleCount = getVisibleCount();
+    const maxOffset = Math.max(0, candleCount - visibleCount + rightPad);
+    return Math.min(Math.max(0, value), maxOffset);
   };
 
   const fetchCandles = async (size, { before, after, limit }) => {
@@ -124,9 +138,11 @@ export default function App() {
 
       console.log("initial " + oldestTime + " " + newestTime);
 
-      // Set initial startIndex
-      const initialStartIndex = Math.floor(initial.length * 0.1) * spacing * scale * 0.2;
-      setOffset({ x: initialStartIndex, y: 0 });
+      // Start at latest candles with a small right-side pad
+      const rightPadCandles = 8;
+      const visibleCount = getVisibleCount();
+      const initialStartIndex = Math.max(0, initial.length - visibleCount + rightPadCandles);
+      setOffset({ x: clampOffset(initialStartIndex, initial.length, rightPadCandles), y: 0 });
       console.log('Initial startIndex:', initialStartIndex);
     })();
     return () => { isMounted = false; };
@@ -141,8 +157,8 @@ export default function App() {
     const container = containerRef.current;
     if (!container) return;
 
-    const startIndex = Math.floor(offset.x / 0.2 / (spacing * scale));
-    const endIndex = Math.floor((offset.x / 0.2 + container.clientWidth) / (spacing * scale));
+    const startIndex = Math.floor(offset.x);
+    const endIndex = Math.floor(offset.x + container.clientWidth / spacing);
 
     setVisibleStartIndex(startIndex);
     setVisibleEndIndex(endIndex);
@@ -174,8 +190,8 @@ export default function App() {
               return sliced;
             });
 
-            const curStartIndex = Math.floor(candles.length * 0.5) * spacing * scale * 0.2;
-            setOffset({ x: curStartIndex, y: 0 });
+            const curStartIndex = Math.floor(candles.length * 0.5);
+            setOffset({ x: clampOffset(curStartIndex, candles.length), y: 0 });
             setMode("scroll");
           }
         })
@@ -212,8 +228,8 @@ export default function App() {
               return merged.slice(-FIXED_CANDLE_COUNT);
             });
 
-            const curStartIndex = Math.floor(candles.length * 0.5) * spacing * scale * 0.2;
-            setOffset({ x: curStartIndex, y: 0 });
+            const curStartIndex = Math.floor(candles.length * 0.5);
+            setOffset({ x: clampOffset(curStartIndex, candles.length), y: 0 });
           }
         })
         .finally(() => setIsLoadingNext(false));
@@ -250,9 +266,13 @@ export default function App() {
         oldestTimeRef.current = newOldest;
         newestTimeRef.current = newNewest;
 
-        // Stick to the right edge of the screen
-        const curStartIndex = Math.floor(candles.length - 100) * spacing * scale * 0.2;
-        setOffset({ x: curStartIndex, y: 0 });
+        if (!isMouseDownRef.current) {
+          // Stick to the right edge of the screen
+          const rightPadCandles = 8;
+          const visibleCount = getVisibleCount();
+          const curStartIndex = Math.max(0, updated.length - visibleCount + rightPadCandles);
+          setOffset({ x: clampOffset(curStartIndex, updated.length, rightPadCandles), y: 0 });
+        }
 
         return updated;
       });
@@ -281,19 +301,21 @@ export default function App() {
       setIsMouseDown(true); 
       setLastPosition({ x: e.clientX, y: e.clientY }); 
       dragStartX.current = offset.x;
+      setMode("scroll");
     };
     const handleMouseUp = () => {
       setIsMouseDown(false); 
-      const deltaCandles = (offset.x - dragStartX.current) * 5 / (spacing * scale);
+      const deltaCandles = offset.x - dragStartX.current;
       console.log("Number of candles moved in one drag:", deltaCandles);
     };
     const handleMouseMove = e => {
       if (!isMouseDown || !lastPosition) return;
       const deltaX = e.clientX - lastPosition.x;
       setLastPosition({ x: e.clientX, y: e.clientY });
-      const maxOffset = Math.max(0, candles.length * spacing - container.clientWidth);
+      const rightPadCandles = 8;
+      const maxOffset = Math.max(0, candles.length - container.clientWidth / spacing + rightPadCandles);
       setOffset(prev => {
-        let newX = prev.x - deltaX * 0.2;
+        let newX = prev.x - deltaX / spacing;
         if (newX < 0) newX = 0;
         if (newX > maxOffset) newX = maxOffset;
         return { ...prev, x: newX };
@@ -331,6 +353,21 @@ export default function App() {
             <span className={`pill ${mode === "realtime" ? "pill-live" : "pill-scroll"}`}>
               {mode === "realtime" ? "Live" : "Scroll"}
             </span>
+            {mode !== "realtime" && (
+              <button
+                type="button"
+                className="pill pill-action"
+                onClick={() => {
+                  const rightPadCandles = 8;
+                  const visibleCount = getVisibleCount();
+                  const curStartIndex = Math.max(0, candles.length - visibleCount + rightPadCandles);
+                  setOffset({ x: clampOffset(curStartIndex, candles.length, rightPadCandles), y: 0 });
+                  setMode("realtime");
+                }}
+              >
+                Go Live
+              </button>
+            )}
             <span className="pill pill-muted">{tickSize} tick</span>
             <span className="pill pill-muted">{candles.length} candles</span>
           </div>
