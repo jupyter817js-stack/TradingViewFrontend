@@ -62,6 +62,12 @@ export default function App() {
     ]);
   };
 
+  const normalizeTime = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return num < 1e12 ? num * 1000 : num;
+  };
+
   const fetchCandles = async (size, { before, after, limit }) => {
     try {
       const hostname = window.location.hostname;
@@ -76,19 +82,24 @@ export default function App() {
       if (!res.ok) return [];
 
       const data = await res.json();
-      console.log('Fetched data times:', data.map(d => new Date(Number(d.time) * 1000).toISOString()));
+      console.log('Fetched data times:', data.map(d => new Date(normalizeTime(d.time)).toISOString()));
       if (!Array.isArray(data)) return [];
 
       return data
         .filter(d => d && d.time != null)
-        .map(d => ({
-          time: Number(d.time) * 1000,
-          open: Number(d.open),
-          high: Number(d.high),
-          low: Number(d.low),
-          close: Number(d.close),
-          volume: Number(d.volume),
-        }));
+        .map(d => {
+          const time = normalizeTime(d.time);
+          if (time == null) return null;
+          return {
+            time,
+            open: Number(d.open),
+            high: Number(d.high),
+            low: Number(d.low),
+            close: Number(d.close),
+            volume: Number(d.volume),
+          };
+        })
+        .filter(Boolean);
     } catch (err) {
       console.error('Fetch error or timeout:', err.message);
       return [];
@@ -108,8 +119,8 @@ export default function App() {
       if (!isMounted || !initial.length) return;
 
       setCandles(initial);
-      setOldestTime(initial[0]?.time / 1000 ?? null);
-      setNewestTime(initial[initial.length - 1]?.time / 1000 ?? null);
+      setOldestTime(initial[0]?.time ?? null);
+      setNewestTime(initial[initial.length - 1]?.time ?? null);
 
       console.log("initial " + oldestTime + " " + newestTime);
 
@@ -151,7 +162,7 @@ export default function App() {
               const merged = [...newData, ...prev];
               const sliced = merged.slice(0, FIXED_CANDLE_COUNT);
 
-              const allTimes = sliced.map(c => c.time / 1000);
+              const allTimes = sliced.map(c => c.time);
               const newOldest = Math.min(...allTimes);
               const newNewest = Math.max(...allTimes);
 
@@ -184,7 +195,7 @@ export default function App() {
               const merged = [...prev, ...newData];
 
               // Calculate min/max before slicing
-              const allTimes = merged.map(c => c.time / 1000);
+              const allTimes = merged.map(c => c.time);
               const newOldest = Math.min(...allTimes);
               const newNewest = Math.max(...allTimes);
 
@@ -231,8 +242,8 @@ export default function App() {
         const updated = [...prev, ...filteredNew];
 
         // Synchronize times/refs
-        const newOldest = updated[0]?.time / 1000 ?? oldestTimeRef.current;
-        const newNewest = updated[updated.length - 1]?.time / 1000 ?? newestTimeRef.current;
+        const newOldest = updated[0]?.time ?? oldestTimeRef.current;
+        const newNewest = updated[updated.length - 1]?.time ?? newestTimeRef.current;
 
         setOldestTime(newOldest);
         setNewestTime(newNewest);
